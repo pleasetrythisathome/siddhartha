@@ -29,10 +29,12 @@
                             [prismatic/schema "0.4.0"]]
             :rum           [[rum "0.2.6"]]})
 
+(def lib-deps [:async :clojure :clojurescript])
+
 (set-env!
  :dependencies (vec
                 (concat
-                 (apply build-deps deps (keys deps))
+                 (apply build-deps deps lib-deps)
                  (mapv #(conj % :scope "test")
                        '[[adzerk/bootlaces "0.1.11"]
                          [adzerk/boot-cljs "0.0-2814-3"]
@@ -63,8 +65,14 @@
       :scm {:url "https://github.com/pleasetrythisathome/siddhartha"}})
 
 (deftask dev
-  "watch and compile cljx, css, cljs, init cljs-repl and push changes to browser"
+  "watch and compile cljx, cljs, init cljs-repl and push changes to browser"
   []
+  (set-env! :source-paths #(conj % "examples")
+            :dependencies #(->> lib-deps
+                                (apply disj (set (keys deps)))
+                                (apply build-deps deps)
+                                (concat %)
+                                vec))
   (comp
    (watch)
    (notify)

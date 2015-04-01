@@ -91,3 +91,38 @@
                      (recur satisfied failed)))))
              (catch Exception e
                e))))))
+
+(defn start-receive-loop! [component]
+  (assert (satisfies? IAsyncProtocol component) "component must satisfy IAsyncProtocol")
+  (let [receive-c (receive-chan component)
+        send-c (send-chan component)
+        events (received-events component)]
+    (assert (and (seq events) receive-c) "components with send events must provide a channel from receive-chan")
+    (when (seq events)
+      (async/take!
+       (async/go
+         (try (loop []
+                (when-let [event (async/<! receive-c)]
+                  (let [[key & args] event
+                        args (or args [])]
+                    (if-let [handler-var (get events key)]
+                      (cond
+                        (not (matching-arities? handler-var [args]))
+                        (throw (ex-info (str "malformed args, event:" key)
+                                        {:reason ::malformed-args
+                                         :event-key key
+                                         :args args
+                                         :expected (:arglists (meta handler-var))
+                                         :handler (meta handler-var)}))
+                        :else
+                        (let [handler (->> handler-var
+                                           meta
+                                           ((juxt :ns :name))
+                                           (apply ns-resolve))]
+                          (apply handler component args)))
+                      (when send-c
+                        (async/put! send-c event))))
+                  (recur)))
+              (catch Exception e
+                e)))
+       throw-err))))

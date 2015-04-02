@@ -25,16 +25,18 @@
   (received-events [_]))
 
 (defn matching-arities? [source-fn arities]
-  (every? (fn [parameters]
-            (some (fn [args]
-                    (let [[args parameters] (map (partial remove (partial = '_))
-                                                 [args parameters])]
-                      (and parameters
-                           (if (= '& (last (butlast parameters)))
-                             (>= (count args) (- (count parameters) 2))
-                             (= (count parameters) (count args))))))
-                  arities))
-          (:arglists (meta source-fn))))
+  (let [arglists (:arglists (meta source-fn))]
+    (assert (seq arglists) (str "no arglists exist for var: " source-fn))
+    (every? (fn [parameters]
+              (some (fn [args]
+                      (let [[args parameters] (map (partial remove (partial = '_))
+                                                   [args parameters])]
+                        (and parameters
+                             (if (= '& (last (butlast parameters)))
+                               (>= (count args) (- (count parameters) 2))
+                               (= (count parameters) (count args))))))
+                    arities))
+            arglists)))
 
 (defn async-handshake! [component]
   (assert (satisfies? IAsyncProtocol component) "component must satisfy IAsyncProtocol")
@@ -69,15 +71,15 @@
                                         (if (and v (matching-arities? v arities))
                                           [(conj satisfied k) failed]
                                           (cond
-                                            (get failed [k arities])
-                                            (throw (ex-info (str "failed circuit matching async-satisifes " k)
-                                                            {:reason ::failed
-                                                             :event-key k
-                                                             :arities arities
-                                                             :component component}))
                                             (not send-c)
                                             (throw (ex-info (str "dead end matching async-satisifes " k)
                                                             {:reason ::dead-end
+                                                             :event-key k
+                                                             :arities arities
+                                                             :component component}))
+                                            (get failed [k arities])
+                                            (throw (ex-info (str "failed circuit matching async-satisifes " k)
+                                                            {:reason ::failed
                                                              :event-key k
                                                              :arities arities
                                                              :component component}))

@@ -1,6 +1,7 @@
 (ns examples.basic
   (:require [clojure.core.async :as async]
             [com.stuartsierra.component :as component :refer (Lifecycle)]
+            [siddhartha.core :refer :all]
             [taoensso.timbre :as log]))
 
 (defprotocol IDropdown

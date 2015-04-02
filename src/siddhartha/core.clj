@@ -38,61 +38,71 @@
                     arities))
             arglists)))
 
-(defn async-handshake! [component]
-  (assert (satisfies? IAsyncProtocol component) "component must satisfy IAsyncProtocol")
-  (let [send-c (send-chan component)
-        receive-c (receive-chan component)]
+(defn async-handshake!
+  ([component] (async-handshake! component 1000))
+  ([component timeout]
+   (assert (satisfies? IAsyncProtocol component) "component must satisfy IAsyncProtocol")
+   (let [send-c (send-chan component)
+         receive-c (receive-chan component)]
 
-    (when-let [events (sent-events component)]
-      (assert (and (seq events) send-c) "components with sent-events must provide a channel from send-chan")
-      (async/put! send-c events (sent-events component)))
+     (when-let [events (sent-events component)]
+       (assert (and (seq events) send-c) "components with sent-events must provide a channel from send-chan")
+       (async/put! send-c events (sent-events component)))
 
-    (when-let [must-satisfy (received-events component)]
-      (assert (and (seq must-satisfy) receive-c) "components with send events must provide a channel from receive-chan")
-      (async/go
-        (try (loop [satisfied #{}
-                    failed #{}]
-               (let [[v c] (async/alts! [receive-c
-                                         (async/timeout 1000)])]
-                 (cond
-                   (= (first v) ::done)
-                   (if (= (second v) component)
-                     true
-                     (do (async/put! send-c v)
-                         (recur satisfied failed)))
-                   (not v)
-                   (throw (ex-info (str "failed matching async-satisifes")
-                                   {:reason ::timeout
-                                    :component component}))
-                   :else
-                   (let [[satisfied failed]
-                         (reduce-kv (fn [[satisfied failed] k arities]
-                                      (let [v (get must-satisfy k)]
-                                        (if (and v (matching-arities? v arities))
-                                          [(conj satisfied k) failed]
-                                          (cond
-                                            (not send-c)
-                                            (throw (ex-info (str "dead end matching async-satisifes " k)
-                                                            {:reason ::dead-end
-                                                             :event-key k
-                                                             :arities arities
-                                                             :component component}))
-                                            (get failed [k arities])
-                                            (throw (ex-info (str "failed circuit matching async-satisifes " k)
-                                                            {:reason ::failed
-                                                             :event-key k
-                                                             :arities arities
-                                                             :component component}))
-                                            :else
-                                            (do
-                                              (async/put! send-c {k arities})
-                                              [satisfied (conj failed [k arities])])))))
-                                    [satisfied failed] v)]
-                     (when-not (seq (set/difference (set (keys must-satisfy)) satisfied))
-                       (async/put! send-c [::done component]))
-                     (recur satisfied failed)))))
-             (catch Exception e
-               e))))))
+     (assert (and (seq (received-events component)) receive-c) "components with received-events must provide a channel from receive-chan")
+     (async/go
+       (try (loop [matched #{}
+                   visited #{}]
+              (let [[v c] (async/alts! [receive-c
+                                        (async/timeout timeout)])
+                    unmatched (fn [matched]
+                                (-> (set (keys (received-events component)))
+                                    (set/difference matched)))]
+                (log/info :event v)
+                (cond
+                  (= (first v) ::satisfied)
+                  (if (= (second v) component)
+                    true
+                    (do (async/put! send-c v)
+                        (recur matched visited)))
+                  (not v)
+                  (throw (let [unmatched (unmatched matched)]
+                           (ex-info (str "timeout matching events: " unmatched)
+                                    {:reason ::timeout
+                                     :matched matched
+                                     :unmatched unmatched
+                                     :component component})))
+                  :else
+                  (let [events v
+                        [matched visited]
+                        (reduce-kv (fn [[matched visited] key sent-arities]
+                                     (let [received-event-handler (get (received-events component) key)]
+                                       (if (and received-event-handler
+                                                (matching-arities? received-event-handler sent-arities))
+                                         [(conj matched key) visited]
+                                         (cond
+                                           (not send-c)
+                                           (throw (ex-info (str "reached signal graph edge without matching event " key)
+                                                           {:reason ::graph-edge
+                                                            :event-key key
+                                                            :sent-arities sent-arities
+                                                            :component component}))
+                                           (get visited [key sent-arities])
+                                           (throw (ex-info (str "revisited node signal graph without matching event " key)
+                                                           {:reason ::revisited
+                                                            :event-key key
+                                                            :sent-arities sent-arities
+                                                            :component component}))
+                                           :else
+                                           (do
+                                             (async/put! send-c {key sent-arities})
+                                             [matched (conj visited [key sent-arities])])))))
+                                   [matched visited] events)]
+                    (when-not (seq (unmatched matched))
+                      (async/put! send-c [::satisfied component]))
+                    (recur matched visited)))))
+            (catch Exception e
+              e))))))
 
 (defn start-receive-loop! [component]
   (assert (satisfies? IAsyncProtocol component) "component must satisfy IAsyncProtocol")

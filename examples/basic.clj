@@ -69,14 +69,7 @@
                           (component/using {:send-c :to-dropdown
                                             :receive-c :from-dropdown})))))
 
-(let [nodes (filter (partial satisfies? AsyncNode) (vals system))]
-  (when (->> (doall
-              (for [node nodes]
-                (async-handshake! node)))
-             (mapv <??)
-             (reduce =))
-    (doseq [node nodes]
-      (start-receive-loop! node))))
+(start-signal-graph! (vals system))
 
 (comment
   (async/put! (:to-dropdown system) [::open])

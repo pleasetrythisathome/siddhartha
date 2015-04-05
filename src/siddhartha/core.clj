@@ -139,3 +139,13 @@
               (catch Exception e
                 e)))
        throw-err))))
+
+(defn start-signal-graph! [nodes]
+  (let [nodes (filter (partial satisfies? AsyncNode) nodes)]
+    (when (->> (doall
+                (for [node nodes]
+                  (async-handshake! node)))
+               (mapv <??)
+               (reduce =))
+      (doseq [node nodes]
+        (start-receive-loop! node)))))

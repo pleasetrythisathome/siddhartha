@@ -4,12 +4,12 @@
             [siddhartha.core :refer :all]
             [taoensso.timbre :as log]))
 
-(defprotocol IDropdown
+(defprotocol DropdownEvents
   (open [_])
   (close [_]))
 
 (defrecord Dropdown [send-c receive-c]
-  IAsyncProtocol
+  AsyncNode
   (send-chan [_]
     send-c)
   (receive-chan [_]
@@ -20,18 +20,18 @@
   (received-events [_]
     {::open #'open
      ::close #'close})
-  IDropdown
+  DropdownEvents
   (open [_]
     (log/info :open))
   (close [_]
     (log/info :close)))
 
-(defprotocol IHandleDropdown
+(defprotocol DropdownEventsHandler
   (on-click-toggle [_ toggled?])
   (on-click-item [_ key]))
 
 (defrecord DropdownHandler [send-c receive-c]
-  IAsyncProtocol
+  AsyncNode
   (send-chan [_]
     send-c)
   (receive-chan [_]
@@ -42,7 +42,7 @@
   (received-events [_]
     {::click-toggle #'on-click-toggle
      ::click-item #'on-click-item})
-  IHandleDropdown
+  DropdownEventsHandler
   (on-click-toggle [_ toggled?]
     (log/info :click-toggle toggled?))
   (on-click-item [_ key]
@@ -60,14 +60,14 @@
                           (component/using {:send-c :to-dropdown
                                             :receive-c :from-dropdown})))))
 
-(let [cmps (filter (partial satisfies? IAsyncProtocol) (vals system))]
+(let [nodes (filter (partial satisfies? AsyncNode) (vals system))]
   (when (->> (doall
-              (for [cmp cmps]
-                (async-handshake! cmp)))
+              (for [node nodes]
+                (async-handshake! node)))
              (mapv <??)
              (reduce =))
-    (doseq [cmp cmps]
-      (start-receive-loop! cmp))))
+    (doseq [node nodes]
+      (start-receive-loop! node))))
 
 (comment
   (async/put! (:to-dropdown system) [::open])

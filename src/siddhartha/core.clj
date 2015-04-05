@@ -1,6 +1,7 @@
 (ns siddhartha.core
   (:require [clojure.core.async :as async]
-            [clojure.set :as set]))
+            [clojure.set :as set]
+            [taoensso.timbre :as log]))
 
 (defn throw-err
   [e]
@@ -18,7 +19,7 @@
   [ch]
   (throw-err (async/<!! ch)))
 
-(defprotocol IAsyncProtocol
+(defprotocol AsyncNode
   (send-chan [_])
   (receive-chan [_])
   (sent-events [_])

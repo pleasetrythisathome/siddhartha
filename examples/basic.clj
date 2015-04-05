@@ -1,8 +1,17 @@
 (ns examples.basic
   (:require [clojure.core.async :as async]
-            [com.stuartsierra.component :as component :refer (Lifecycle)]
+            [com.stuartsierra.component :as component]
             [siddhartha.core :refer :all]
-            [taoensso.timbre :as log]))
+            [taoensso.timbre :as log])
+  (:import [clojure.core.async.impl.channels ManyToManyChannel]))
+
+(extend-type ManyToManyChannel
+  component/Lifecycle
+  (start [this]
+    this)
+  (stop [this]
+    (close! this)
+    this))
 
 (defprotocol DropdownEvents
   (open [_])

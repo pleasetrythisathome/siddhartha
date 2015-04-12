@@ -1,23 +1,36 @@
 (ns siddhartha.core
-  (:require [clojure.core.async :as async]
-            [clojure.set :as set]
-            [taoensso.timbre :as log]))
+  (:require #+clj  [clojure.core.async :as async :refer [go go-loop]]
+            #+cljs [cljs.core.async :as async]
+            [clojure.set :as set])
+  #+cljs
+  (:require-macros [cljs.core.async.macros :refer [go go-loop]]
+                   [siddhartha.core :refer [<?]]))
+
+#+cljs
+(enable-console-print!)
 
 (defn throw-err
   [e]
-  (when (instance? Throwable e)
+  (when (instance? #+clj Throwable #+cljs js/Error e)
+    #+cljs
+    (.log js/console e)
     (throw e))
   e)
 
-(defn <?
-  "go blocking take with error handling"
-  [ch]
-  (throw-err (async/<! ch)))
+(defn take-catch [c callback]
+  (async/take! c #(-> % throw-err callback)))
 
+#+clj
+(defmacro <?
+  "cljs go blocking take with error handling"
+  [ch]
+  `(siddhartha.core.throw-err (cljs.core.async/<! ~ch)))
+
+#+clj
 (defn <??
   "blocking take with error handling"
   [ch]
-  (throw-err (async/<!! ch)))
+  `(siddhartha.core.throw-err (async/<!! ~ch)))
 
 (defprotocol AsyncNode
   (send-chan [_])
@@ -26,7 +39,10 @@
   (received-events [_]))
 
 (defn matching-arities? [source-fn arities]
-  (let [arglists (:arglists (meta source-fn))]
+  (let [arglists (-> source-fn
+                     meta
+                     :arglists
+                     #+cljs second)]
     (assert (seq arglists) (str "no arglists exist for var: " source-fn))
     (every? (fn [parameters]
               (some (fn [args]
@@ -42,7 +58,7 @@
 (defn async-handshake!
   ([component] (async-handshake! component 1000))
   ([component timeout]
-   (assert (satisfies? IAsyncProtocol component) "component must satisfy IAsyncProtocol")
+   (assert (satisfies? AsyncNode component) "component must satisfy AsyncNode")
    (let [send-c (send-chan component)
          receive-c (receive-chan component)]
 
@@ -51,7 +67,7 @@
        (async/put! send-c events (sent-events component)))
 
      (assert (and (seq (received-events component)) receive-c) "components with received-events must provide a channel from receive-chan")
-     (async/go
+     (go
        (try (loop [matched #{}
                    visited #{}]
               (let [[v c] (async/alts! [receive-c
@@ -59,7 +75,6 @@
                     unmatched (fn [matched]
                                 (-> (set (keys (received-events component)))
                                     (set/difference matched)))]
-                (log/info :event v)
                 (cond
                   (= (first v) ::satisfied)
                   (if (= (second v) component)
@@ -102,46 +117,58 @@
                     (when-not (seq (unmatched matched))
                       (async/put! send-c [::satisfied component]))
                     (recur matched visited)))))
-            (catch Exception e
+            (catch #+clj Exception #+cljs js/Error e
               e))))))
 
 (defn start-receive-loop! [component]
-  (assert (satisfies? IAsyncProtocol component) "component must satisfy IAsyncProtocol")
+  (assert (satisfies? AsyncNode component) "component must satisfy IAsyncProtocol")
   (let [receive-c (receive-chan component)
         send-c (send-chan component)
         events (received-events component)]
     (assert (and (seq events) receive-c) "components with send events must provide a channel from receive-chan")
     (when (seq events)
-      (async/take!
-       (async/go
-         (try (loop []
-                (when-let [event (async/<! receive-c)]
-                  (let [[key & args] event
-                        args (or args [])]
-                    (if-let [handler-var (get events key)]
-                      (cond
-                        (not (matching-arities? handler-var [args]))
-                        (throw (ex-info (str "malformed args, event:" key)
-                                        {:reason ::malformed-args
-                                         :event-key key
-                                         :args args
-                                         :expected (:arglists (meta handler-var))
-                                         :handler (meta handler-var)}))
-                        :else
-                        (let [handler (->> handler-var
-                                           meta
-                                           ((juxt :ns :name))
-                                           (apply ns-resolve))]
-                          (apply handler component args)))
-                      (when send-c
-                        (async/put! send-c event))))
-                  (recur)))
-              (catch Exception e
-                e)))
-       throw-err))))
+      (-> (loop []
+            (when-let [event (async/<! receive-c)]
+              (let [[key & args] event
+                    args (or args [])]
+                (if-let [handler-var (get events key)]
+                  (cond
+                    (not (matching-arities? handler-var [args]))
+                    (throw (ex-info (str "malformed args, event:" key)
+                                    {:reason ::malformed-args
+                                     :event-key key
+                                     :args args
+                                     :expected (:arglists (meta handler-var))
+                                     :handler (meta handler-var)}))
+                    :else
+                    (let [handler (->> handler-var
+                                       meta
+                                       ((juxt :ns :name))
+                                       (apply ns-resolve))]
+                      (apply handler component args)))
+                  (when send-c
+                    (async/put! send-c event))))
+              (recur)))
+          (try (catch #+clj Exception #+cljs js/Error e
+                      e))
+          go
+          (async/take! throw-err)))))
 
 (defn start-signal-graph! [nodes]
-  (let [nodes (filter (partial satisfies? AsyncNode) nodes)]
+  (let [nodes (filter #(satisfies? AsyncNode %) nodes)]
+    #+cljs
+    (let [handshakes (doall
+                      (for [node nodes]
+                        (async-handshake! node)))]
+      (take-catch
+       (go-loop [handshakes handshakes]
+         (let [[v c] (async/alts! (vec handshakes))]
+           (throw-err v)
+           (when-let [remaining (seq (disj (set handshakes) c))]
+             (recur remaining))))
+       #(doseq [node nodes]
+          (start-receive-loop! node))))
+    #+clj
     (when (->> (doall
                 (for [node nodes]
                   (async-handshake! node)))

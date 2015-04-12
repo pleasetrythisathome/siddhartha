@@ -1,7 +1,9 @@
 (ns dropdown.core
   (:require [cljs.core.async :as async]
             [quile.component :as component]
-            [siddhartha.core :as sid :refer (AsyncNode)]))
+            [rum]
+            [siddhartha.core :as sid :refer (AsyncNode)]
+            [dropdown.rum :refer [fc]]))
 
 (enable-console-print!)
 
@@ -12,6 +14,9 @@
   (stop [this]
     (async/close! this)
     this))
+
+(defprotocol ReactComponent
+  (react-cmp [_]))
 
 (defprotocol DropdownEvents
   (open [_])
@@ -33,7 +38,13 @@
   (open [_]
     (print :open))
   (close [_]
-    (print :close)))
+    (print :close))
+  ReactComponent
+  (react-cmp [_]
+    (fc {:display-name "dropdown"
+         :render
+         (fn []
+           [:div "dropdown"])})))
 
 (defprotocol DropdownEventsHandler
   (on-click-toggle [_ toggled?])
@@ -70,6 +81,7 @@
                                             :receive-c :from-dropdown})))))
 
 (sid/start-signal-graph! (vals system))
+(rum/mount ((react-cmp (:dropdown system))) (.-body js/document))
 
 (comment
   (async/put! (:to-dropdown system) [::open])

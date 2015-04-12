@@ -29,7 +29,7 @@
                             [weasel "0.7.0-SNAPSHOT"]]
             :schema        [[prismatic/plumbing "0.4.2"]
                             [prismatic/schema "0.4.0"]]
-            :react         [[org.omcljs/om "0.8.8"]]})
+            :react         [[rum "0.2.6"]]})
 
 (def lib-deps [:async :clojure :clojurescript])
 

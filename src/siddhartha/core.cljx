@@ -141,11 +141,7 @@
                                      :expected (:arglists (meta handler-var))
                                      :handler (meta handler-var)}))
                     :else
-                    (let [handler (->> handler-var
-                                       meta
-                                       ((juxt :ns :name))
-                                       (apply ns-resolve))]
-                      (apply handler component args)))
+                    (apply @handler-var component args))
                   (when send-c
                     (async/put! send-c event))))
               (recur)))

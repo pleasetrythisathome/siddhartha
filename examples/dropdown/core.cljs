@@ -2,7 +2,7 @@
   (:require [cljs.core.async :as async]
             [quile.component :as component]
             [rum]
-            [siddhartha.core :as sid :refer (AsyncNode)]
+            [siddhartha.core :as sid :refer (AsyncNode send-chan send!)]
             [dropdown.rum :refer [fc]]))
 
 (enable-console-print!)
@@ -18,9 +18,13 @@
 (defprotocol ReactComponent
   (react-cmp [_]))
 
-(defprotocol DropdownEvents
+(defprotocol DropdownActions
   (open [_])
   (close [_]))
+
+(defprotocol DropdownEvents
+  (click-toggle [_ toggled?])
+  (click-item [_ key]))
 
 (defrecord Dropdown [send-c receive-c]
   AsyncNode
@@ -34,17 +38,31 @@
   (received-events [_]
     {::open (var open)
      ::close (var close)})
-  DropdownEvents
+  DropdownActions
   (open [_]
-    (print :open))
+    (.log js/console "open"))
   (close [_]
-    (print :close))
+    (.log js/console "close"))
   ReactComponent
-  (react-cmp [_]
+  (react-cmp [this]
     (fc {:display-name "dropdown"
+         :mixins [(rum/local false :open)]
+         :state? true
          :render
-         (fn []
-           [:div "dropdown"])})))
+         (fn [{:keys [open]}]
+           [:div
+            [:button
+             {:on-click #(send! this ::click-toggle (swap! open not))}
+             (if @open
+               "close"
+               "open")]
+            (when @open
+              [:ul
+               (for [n (range 5)]
+                 [:button
+                  {:on-click #(send! this ::click-item n)
+                   :key n}
+                  "item " n])])])})))
 
 (defprotocol DropdownEventsHandler
   (on-click-toggle [_ toggled?])
@@ -64,9 +82,9 @@
      ::click-item (var on-click-item)})
   DropdownEventsHandler
   (on-click-toggle [_ toggled?]
-    (print :click-toggle toggled?))
+    (.log js/console (str "click-toggle " toggled?)))
   (on-click-item [_ key]
-    (print :click-item key)))
+    (.log js/console (str "click-item " key))))
 
 (def system
   (component/start

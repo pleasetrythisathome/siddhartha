@@ -38,6 +38,10 @@
   (sent-events [_])
   (received-events [_]))
 
+(defn send! [cmp key & args]
+  (assert (get (set (keys (sent-events cmp))) key) "you can't send an event that isn't part of sent-events!''")
+  (async/put! (send-chan cmp) (cons key args)))
+
 (defn matching-arities? [source-fn arities]
   (let [arglists (-> source-fn
                      meta

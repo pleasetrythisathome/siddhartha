@@ -1,16 +1,16 @@
-(ns examples.basic
-  (:require [clojure.core.async :as async]
-            [com.stuartsierra.component :as component]
-            [siddhartha.core :refer :all]
-            [taoensso.timbre :as log])
-  (:import [clojure.core.async.impl.channels ManyToManyChannel]))
+(ns dropdown.core
+  (:require [cljs.core.async :as async]
+            [quile.component :as component]
+            [siddhartha.core :as sid :refer (AsyncNode)]))
 
-(extend-type ManyToManyChannel
+(enable-console-print!)
+
+(extend-type cljs.core.async.impl.channels.ManyToManyChannel
   component/Lifecycle
   (start [this]
     this)
   (stop [this]
-    (close! this)
+    (async/close! this)
     this))
 
 (defprotocol DropdownEvents
@@ -27,13 +27,13 @@
     {::click-toggle '[[toggled?]]
      ::click-item '[[key]]})
   (received-events [_]
-    {::open #'open
-     ::close #'close})
+    {::open (var open)
+     ::close (var close)})
   DropdownEvents
   (open [_]
-    (log/info :open))
+    (print :open))
   (close [_]
-    (log/info :close)))
+    (print :close)))
 
 (defprotocol DropdownEventsHandler
   (on-click-toggle [_ toggled?])
@@ -49,13 +49,13 @@
     {::open [[]]
      ::close [[]]})
   (received-events [_]
-    {::click-toggle #'on-click-toggle
-     ::click-item #'on-click-item})
+    {::click-toggle (var on-click-toggle)
+     ::click-item (var on-click-item)})
   DropdownEventsHandler
   (on-click-toggle [_ toggled?]
-    (log/info :click-toggle toggled?))
+    (print :click-toggle toggled?))
   (on-click-item [_ key]
-    (log/info :click-item key)))
+    (print :click-item key)))
 
 (def system
   (component/start
@@ -69,7 +69,7 @@
                           (component/using {:send-c :to-dropdown
                                             :receive-c :from-dropdown})))))
 
-(start-signal-graph! (vals system))
+(sid/start-signal-graph! (vals system))
 
 (comment
   (async/put! (:to-dropdown system) [::open])
